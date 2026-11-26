@@ -2,69 +2,57 @@ name: Generate Terminal GIF
 
 on:
   schedule:
-    - cron: '0 6 * * *'   # daily at 06:00 UTC
+    - cron: '23 11 * * *'
   workflow_dispatch:
-    inputs:
-      theme:
-        description: 'Theme to use (default | macos | debian)'
-        required: false
-        default: 'default'
-      wallpaper:
-        description: 'Wallpaper filename in assets/ for the debian theme (e.g. debian_dark_wallpaper.jpg)'
-        required: false
-        default: ''
-  push:
-    branches:
-      - main
+
+concurrency:
+  group: terminal-gif
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  generate-gif:
+  render:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GH_TOKEN }}
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+          persist-credentials: false
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install FFmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install Python dependencies
+        run: python -m pip install github-readme-terminal requests python-dotenv Pillow
+      - name: Render the terminal
+        run: python generate_with_stats.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: terminal-gif
+          path: output.gif
+          if-no-files-found: error
+          retention-days: 1
 
-      - name: Install dependencies
-        run: pip install github-readme-terminal requests python-dotenv Pillow
-
-      - name: Generate GIF
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
-          # Automatically injected by GitHub — no changes needed when forking.
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
-          # Select theme via repo variable: Settings → Variables → Actions → THEME
-          # Valid values: default | macos | debian   (fallback: default)
-          THEME: ${{ vars.THEME || inputs.theme || 'default' }}
-          # For the debian theme: filename of the wallpaper inside assets/
-          # Set via repo variable WALLPAPER (e.g. debian_dark_wallpaper.jpg)
-          # Leave empty to use the default (debian_wallpaper.png)
-          WALLPAPER: ${{ vars.WALLPAPER || inputs.wallpaper || '' }}
+  publish:
+    needs: render
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          name: terminal-gif
+      - name: Publish the GIF if changed
         run: |
-          echo "Theme: $THEME  |  Wallpaper: ${WALLPAPER:-default}  |  User: $GITHUB_REPOSITORY_OWNER"
-          case "$THEME" in
-            debian)  python3 generate_debian.py ;;
-            default) python3 generate_with_stats.py ;;
-            *)       python3 generate_liquid_glass.py ;;
-          esac
-
-      - name: Commit and push if changed
-        run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add output.gif
-          git diff --quiet && git diff --staged --quiet || \
-            (git commit -m "Update terminal GIF [skip ci]" && git pull --rebase && git push)
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'Update terminal GIF'
+          git push origin HEAD:main
