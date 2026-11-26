@@ -4,7 +4,12 @@ import requests
 
 USERNAME = os.environ.get("GITHUB_REPOSITORY_OWNER") or os.environ.get("GIT_USERNAME", "abrara9123")
 
-response = requests.get(f"https://api.github.com/users/{USERNAME}", timeout=20)
+headers = {"Accept": "application/vnd.github+json"}
+if token := os.environ.get("GH_TOKEN"):
+    headers["Authorization"] = f"Bearer {token}"
+response = requests.get(
+    f"https://api.github.com/users/{USERNAME}", headers=headers, timeout=20
+)
 response.raise_for_status()
 profile = response.json()
 
