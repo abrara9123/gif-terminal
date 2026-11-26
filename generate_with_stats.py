@@ -94,3 +94,55 @@ t.gen_gif()
 print("\n GIF generated: output.gif")
 print("\nTo use in your README.md:")
 print('![Terminal GIF](./output.gif)')
+
+
+def add_space_wallpaper():
+    from pathlib import Path
+
+    from PIL import Image, ImageChops, ImageOps, ImageSequence
+
+    output = Path("output.gif")
+    asset = Path(__file__).resolve().parent / "assets" / "image(20261126-031050).png"
+    frames = []
+    durations = []
+
+    with Image.open(output) as animation, Image.open(asset) as artwork:
+        width, height = animation.size
+        corner = (width - 1, height - 1)
+        terminal_bg = animation.convert("RGB").getpixel(corner)
+        backdrop = Image.new("RGB", animation.size, terminal_bg)
+        image = ImageOps.contain(artwork.convert("RGB"), animation.size, Image.Resampling.LANCZOS)
+
+        # Keep the full artwork at the right and fade it behind the terminal text.
+        fade = Image.new("L", (image.width, 1))
+        fade.putdata([round(218 * min(1.0, x / (image.width * 0.5))) for x in range(image.width)])
+        backdrop.paste(image, (width - image.width, (height - image.height) // 2), fade.resize(image.size))
+
+        # Share one palette across frames so the wallpaper stays still as text changes.
+        palette = Image.new("P", (1, 1))
+        backdrop_colors = backdrop.quantize(colors=224).getpalette()[:224 * 3]
+        terminal_colors = [
+            (255, 255, 255), (211, 215, 222), (255, 90, 90), (235, 185, 90),
+            (115, 210, 240), (92, 160, 255), (110, 210, 130), (30, 115, 63),
+        ]
+        palette.putpalette(backdrop_colors + [channel for rgb in terminal_colors for channel in rgb])
+        loop = animation.info.get("loop", 0)
+        for frame in ImageSequence.Iterator(animation):
+            rgb = frame.convert("RGB")
+            flat = Image.new("RGB", animation.size, rgb.getpixel(corner))
+            red, green, blue = ImageChops.difference(rgb, flat).split()
+            difference = ImageChops.lighter(ImageChops.lighter(red, green), blue)
+            text_mask = difference.point(lambda value: 255 if value > 4 else 0)
+            composite = Image.composite(rgb, backdrop, text_mask)
+            frames.append(composite.quantize(palette=palette, dither=Image.Dither.NONE))
+            durations.append(frame.info.get("duration", 40))
+
+    rendered = output.with_suffix(".wallpaper.gif")
+    frames[0].save(
+        rendered, save_all=True, append_images=frames[1:], duration=durations,
+        loop=loop, disposal=1, optimize=True,
+    )
+    rendered.replace(output)
+
+
+add_space_wallpaper()
